@@ -1,0 +1,58 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Android Auto SDK (aauto.aar) indir + doğrula
+        env:
+          # Sabit commit ve hash: dosya değişirse derleme durur
+          AAR_URL: https://raw.githubusercontent.com/AndreyPavlenko/Fermata/7d2bd42e0fea98a796ba069b56c48ef07d874549/fermata/lib/auto/aauto.aar
+          AAR_SHA256: 99337c3b591ac9670c12b508da38886aedba61dd494f39f5f166f02580ec584b
+        run: |
+          mkdir -p app/libs
+          [ -f app/libs/aauto.aar ] || curl -fsSL -o app/libs/aauto.aar "$AAR_URL"
+          echo "$AAR_SHA256  app/libs/aauto.aar" | sha256sum -c -
+
+      - name: İmza anahtarı (ilk çalıştırmada oluştur ve repoya ekle)
+        run: |
+          if [ ! -f app/arabatube.keystore ]; then
+            keytool -genkeypair -keystore app/arabatube.keystore -storetype PKCS12 \
+              -storepass arabatube -keypass arabatube -alias arabatube \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=ArabaTube"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add app/arabatube.keystore
+            git commit -m "İmza anahtarı eklendi [skip ci]"
+            git push
+          fi
+
+      - name: APK derle
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: APK'yı yeniden adlandır
+        run: cp app/build/outputs/apk/debug/app-debug.apk ArabaTube.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArabaTube
+          path: ArabaTube.apk
